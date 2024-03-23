@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>画像認証チャットアプリ</title>
+
+    <!-- The core Firebase JS SDK is always required and must be listed first -->
+    <link rel="stylesheet" href="reset.css" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://www.gstatic.com/firebasejs/7.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/7.6.1/firebase-storage.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
+  </head>
+  <body>
+    <header><h1>画像認証つきチャット</h1></header>
+    <main>
+      <div id="message">
+        <div>
+          <input type="file" id="file" />
+        </div>
+      </div>
+      <div>名前：<input type="text" id="uname" /></div>
+      <div>
+        <div>
+          <textarea id="text" cols="30" rows="5"></textarea>
+        </div>
+        <button id="send" type="button">
+          <span id="up">アップロード・送信</span>
+        </button>
+      </div>
+      <div class="image_tensorflow">
+        <p>ここに画像認識の結果が出ます</p>
+        <img id="preview" />
+        <div id="results"></div>
+      </div>
+      <!-- コンテンツ表示画面 -->
+      <div id="output"></div>
+    </main>
+    <!--/ コンテンツ表示画面 -->
+
+    <!-- 以下Firebase -->
+    <script type="module">
+      // Import the functions you need from the SDKs you need
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+      import {
+        getDatabase,
+        ref,
+        push,
+        set,
+        update,
+        remove,
+        onChildAdded,
+        onChildChanged,
+        onChildRemoved,
+        onValue,
+      } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+      // TODO: Add SDKs for Firebase products that you want to use
+      // https://firebase.google.com/docs/web/setup#available-libraries
+
+      // Your web app's Firebase configuration
+      let firebaseConfig = {
+        //firebaseに接続するためのオブジェクト変数
+        apiKey: "AIzaSyDeFdVDmRQnigJlwdI1FFVPnx7HV2AsTOM",
+        authDomain: "sample-c4768.firebaseapp.com",
+        databaseURL: "https://sample-c4768-default-rtdb.firebaseio.com",
+        projectId: "sample-c4768",
+        storageBucket: "sample-c4768.appspot.com",
+        messagingSenderId: "131805254183",
+        appId: "1:131805254183:web:85024f84025f27a18a3402",
+      };
+      // Initialize Firebase
+      firebase.initializeApp(firebaseConfig);
+      const app = initializeApp(firebaseConfig); //このキーを持ってinitializeAppを実行する
+      const db = getDatabase(app); //RealtimeDatabaseに接続  getDatabaseはリアルタイムデータベースの取得
+      const dbRef = ref(db, "chat"); //どこの階層のデータを取得するかということ  RealtimeDBの"chat"をつかう
+
+      //画像アップロード
+      document.getElementById("up").addEventListener("click", function () {
+        let files = document.getElementById("file").files;
+        let image = files[0];
+
+        let ref = firebase.storage().ref().child(image.name);
+        ref
+          .put(image)
+          .then(function (snapshot) {
+            alert("アップロードしました");
+            // アップロードした画像のダウンロードURLを取得
+            return snapshot.ref.getDownloadURL();
+          })
+          .then(function (url) {
+            // 画像を表示する要素を作成
+            let img = document.createElement("img");
+            img.src = url;
+            // document.body.appendChild(img);
+          })
+          .catch(function (error) {
+            console.error("画像のアップロードまたは表示に失敗しました:", error);
+          });
+      });
+
+      //投稿時間の取得
+      let now = new Date();
+      const nowMon = now.getMonth() + 1;
+      const nowDate = now.getDate();
+      const nowHour = now.getHours();
+      const nowMinute = now.getMinutes();
+      const date = `${nowMon}/${nowDate} ${nowHour}:${nowMinute}`;
+
+      // 送信ボタンのクリックイベントハンドラ
+      $("#send").on("click", function () {
+        const uname = $("#uname").val();
+        const text = $("#text").val();
+        const file = $("#file")[0].files[0];
+
+        let msg = {
+          uname: uname,
+          text: text,
+        };
+
+        if (file) {
+          // 画像ファイルがある場合は、ストレージにアップロードし、URL を取得する
+          let ref = firebase.storage().ref().child(file.name);
+          ref
+            .put(file)
+            .then(function (snapshot) {
+              return snapshot.ref.getDownloadURL();
+            })
+            .then(function (url) {
+              // メッセージオブジェクトに画像の URL を追加
+              msg.imageUrl = url;
+              push(dbRef, msg);
+              $("#text").val(""); // テキストエリアを空にする
+              $("#file").val(""); // ファイル入力をリセット
+            })
+            .catch(function (error) {
+              console.error("画像のアップロードに失敗しました:", error);
+            });
+        } else {
+          // 画像ファイルがない場合は、そのままメッセージを保存
+          push(dbRef, msg);
+          $("#text").val(""); // テキストエリアを空にする
+        }
+      });
+
+      // onChildAdded イベントハンドラ
+      onChildAdded(dbRef, function (data) {
+        const msg = data.val();
+        const key = data.key;
+        let h = '<p id="' + key + '">';
+        if (msg.imageUrl) {
+          // 画像の URL がある場合は img 要素を作成
+          h += '<img width="300" src="' + msg.imageUrl + '" /><br>';
+        }
+        h += msg.uname + "<br>";
+        h +=
+          '<span contenteditable="true" id="' +
+          key +
+          '_update">' +
+          msg.text +
+          "</span>" +
+          "<br>";
+        h += date;
+        h += '<span class="remove" data-key="' + key + '"> 🗑️ </span>';
+        h += '<span class="update" data-key="' + key + '"> ⤴️ </span>';
+        h += "</p>";
+        $("#output").prepend(h);
+
+        // 画像認識の結果を表示
+        if (msg.imageUrl) {
+          const img = document.createElement("img");
+          img.src = msg.imageUrl;
+
+          img.onload = async () => {
+            const predictions = await model.classify(img);
+            const resultsDiv = document.getElementById("results-" + key);
+            resultsDiv.innerHTML = "";
+            predictions.forEach((prediction) => {
+              const element = document.createElement("div");
+              element.innerHTML = `${prediction.className}: ${(
+                prediction.probability * 100
+              ).toFixed(2)}%`;
+              resultsDiv.appendChild(element);
+            });
+          };
+        }
+      });
+
+      //更新
+      onChildChanged(dbRef, function (data) {
+        $("#" + data.key + "_update").text(data.val().text);
+        $("#" + data.key + "_update")
+          .fadeOut(100)
+          .fadeIn(100)
+          .fadeOut(100)
+          .fadeIn(100);
+      });
+
+      onChildRemoved(dbRef, function (data) {
+        $("#" + data.key).remove();
+      });
+
+      // 削除ボタンクリック時の処理
+      $("#output").on("click", ".remove", function () {
+        const key = $(this).data("key");
+        const chatRef = ref(db, "chat/" + key);
+        remove(chatRef)
+          .then(() => {
+            $("#" + key).remove(); // 要素の削除は削除処理の完了後に行う
+          })
+          .catch((error) => {
+            console.error("削除に失敗しました:", error);
+          });
+      });
+
+      // 更新ボタンクリック時の処理(修正）
+      $("#output").on("click", ".update", function () {
+        const key = $(this).data("key");
+        const text = $("#" + key + "_update").html();
+        const uname = $("#" + key)
+          .find("span:first")
+          .text()
+          .trim(); // .trim()を追加
+        const updatedMsg = { uname, text };
+        update(ref(db, "chat/" + key), { uname, text });
+      });
+
+      // モデルを非同期でロード
+      async function loadModel() {
+        const model = await mobilenet.load();
+
+        const fileInput = document.getElementById("file");
+        const preview = document.getElementById("preview");
+        const results = document.getElementById("results");
+
+        // ファイル入力時の処理
+        fileInput.addEventListener("change", async () => {
+          const file = fileInput.files[0];
+          const img = document.createElement("img");
+          img.src = URL.createObjectURL(file);
+
+          // 画像がロードされた後に認識処理を実行
+          img.onload = async () => {
+            // 画像認識を実行
+            const predictions = await model.classify(img);
+
+            // 結果を表示
+            results.innerHTML = "";
+            predictions.forEach((prediction) => {
+              const element = document.createElement("div");
+              element.innerHTML = `${prediction.className}: ${(
+                prediction.probability * 100
+              ).toFixed(2)}%`;
+              results.appendChild(element);
+            });
+          };
+
+          // プレビューに画像を表示
+          preview.src = img.src;
+        });
+      }
+
+      loadModel();
+    </script>
+  </body>
+</html>
